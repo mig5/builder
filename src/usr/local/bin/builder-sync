@@ -1,0 +1,150 @@
+#!/bin/bash
+#
+# Simple script to help with preparing a server for 
+# hosting a Drupal app (directory structure, vhost, db etc)
+#
+# Written by mig5 September 2012
+
+source /usr/local/etc/builder-common || exit 1
+
+usage()
+{
+cat << EOF
+usage: builder-sync options
+
+This script syncs staging data down to a local dev site.
+
+OPTIONS:
+   -u	URL of your site. Recommended to be <something>.dev.example.com
+   -n	Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+   -s   db,files,all - The type of sync to run. Valid options are 'db', 'files' or 'all', with 'all' being the default.
+   -b   Optional. Branch to sync from (assuming that there are multiple branches on the remote side. Defaults to 'master'
+   -c   Optional. Clean (sanitise) the databases to remove or protect sensitive data.
+   -f   Optional. Perform a 'full' file sync (even large files), instead of only files 100k or smaller.
+   -h   This help message
+EOF
+}
+
+
+SITE=
+SHORTNAME=
+SYNC=
+BRANCH="master"
+CLEAN=0
+FULL=0
+
+while getopts "u:n:s:b:cfh" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit
+      ;;
+    u)
+      SITE=$OPTARG
+      ;;
+    n)
+      SHORTNAME=$OPTARG
+      ;;
+    s)
+      SYNC=$OPTARG
+      ;;
+    b)
+      BRANCH=$OPTARG
+      ;;
+    c)
+      CLEAN=1
+      ;;
+    f)
+      FULL=1
+      ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+# Check that required arguments were sent.
+if [[ -z $SITE ]]; then
+  color '31;1' "Missing a site URL!"
+  usage
+  exit 1
+fi
+
+if [[ -z $SHORTNAME ]]; then
+  color '31;1' "Missing a shortname for the site!"
+  usage
+  exit 1
+fi
+
+if [[ -z $SYNC ]]; then
+  color '31;1' "Missing a sync type!"
+  usage
+  exit 1
+fi
+
+sync_data_drupal_db() {
+  # Call to Fabric to fetch the database dump
+  fab -f /usr/local/bin/builder-fab.py main:shortname=$SHORTNAME,url=$SITE,synctype=db,branch=$BRANCH || exit 1
+
+  echo "===> Dropping the local Drupal database - we'll re-create and import the copy from staging"
+  # Need to drop and re-create the database - some tables may be present locally that weren't
+  # in prod e.g from newer codebase. drush updatedb later, can re-implement those.
+  mysqladmin -f drop $SHORTNAME
+  echo "===> Importing the Drupal database dump into the local dev site"
+  mysqladmin create $SHORTNAME
+
+  # Extract and then import the database
+  gunzip ~/sql-dumps/drupal_${SHORTNAME}.sql.gz
+  # Run the import via pv, if present, so we get a pretty progress bar :)
+  which pv 2> /dev/null > /dev/null && which pv | grep -v 'no pv in' > /dev/null
+  if [ $? -eq 0 ]; then
+    pv -i 1 -p -t -e ~/sql-dumps/drupal_${SHORTNAME}.sql | drush @$SITE sql-cli
+  else
+    cat ~/sql-dumps/drupal_${SHORTNAME}.sql | drush @$SITE sql-cli
+  fi
+  rm -f ~/sql-dumps/drupal_${SHORTNAME}.sql
+
+  echo "===> Running drush updatedb on the site"
+  drush -y @$SITE updatedb
+
+  echo "===> Clearing the Drupal cache"
+  drush -y @$SITE cc all
+
+  echo "===> Resetting the UID 1 user password to 'admin' for local dev convenience"
+  drush @$SITE user-password `drush @${SITE} uinf 1 | grep name | cut -d\: -f2` --password=admin
+
+  # This is a good opportunity to perform any horrible project-specific modifications to
+  # the database, such as additional vsets etc.
+  # Hopefully you don't have to though!
+
+  # Database sanitisation tasks.
+  if [[ $CLEAN -eq 1 ]]; then
+    echo "===> Sanitising the Drupal database (changes email addresses of users to prevent local dev site sending mail)..."
+    drush @$SITE sql-query "UPDATE users SET mail = CONCAT(name, '@localhost')"
+  fi
+}
+
+sync_data_drupal_files() {
+  # Find out if we are operating in a 'www' subdir in the repo or if it's in the top level, like Acquia repos
+  check_for_www_subdirectory
+
+  # Call to Fabric to rsync down the remote files dir to our local copy.
+  fab -f /usr/local/bin/builder-fab.py main:shortname=$SHORTNAME,url=$SITE,synctype=files,branch=$BRANCH,www_subdir=$WWWSUBDIR,full=$FULL || exit 1
+}
+
+# Decide what to sync here
+
+# DB sync, or all?
+if [[ $SYNC == 'db' || $SYNC == 'all' ]]; then
+  if [[ $CLEAN -eq 1 ]]; then
+    echo "***** NOTE: I will be 'cleaning' the databases after syncing, to sanitise sensitive data (locally). CTRL+C quickly if you want to cancel this! *****"
+  fi
+  sync_data_drupal_db $SHORTNAME $SITE $BRANCH $CLEAN
+fi
+
+# File sync, or all?
+if [[ $SYNC == 'files' || $SYNC == 'all' ]]; then
+  sync_data_drupal_files $SHORTNAME $SITE $BRANCH $CLEAN
+fi

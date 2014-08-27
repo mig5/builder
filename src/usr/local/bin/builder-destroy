@@ -1,0 +1,107 @@
+#!/bin/bash
+#
+# Simple script to help with preparing a server for 
+# hosting a Drupal app (directory structure, vhost, db etc)
+#
+# Written by mig5 September 2012
+
+source /usr/local/etc/builder-common || exit 1
+
+usage()
+{
+cat << EOF
+usage: builder-destroy options
+
+This script removes a site completely from the system.
+
+OPTIONS:
+   -u	URL of your site. Recommended to be <something>.dev.example.com
+   -n   Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+   -h   This help message
+EOF
+}
+
+SITE=
+
+while getopts "u:n:h" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit
+      ;;
+    u)
+      SITE=$OPTARG
+      ;;
+    n)
+      SHORTNAME=$OPTARG
+      ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+# Check that required arguments were sent.
+if [[ -z $SITE ]]; then
+  color '31;1' "Missing a site URL!"
+  usage
+  exit 1
+fi
+
+if [[ -z $SHORTNAME ]]; then
+  color '31;1' "Missing a shortname for the site!"
+  usage
+  exit 1
+fi
+
+#####################################################################
+#                                                                   #
+# Our functions follow, and are called at the bottom of the script. #
+#                                                                   #
+#####################################################################
+
+# Drop the site database
+drop_site_database() {
+  echo "===> Dropping any relevant databases..."
+  # Drop any databases that have names like this
+  # @TODO could be safer
+  mysql -e "show databases" | grep -q ${SHORTNAME}
+  if [ $? -eq 0 ]; then
+    mysqladmin -f drop $SHORTNAME
+  fi
+
+}
+
+# Delete a Drush site alias
+remove_drush_site_alias() {
+  echo "===> Removing the drush alias /etc/drush/$SITE.alias.drushrc.php, if it is present..."
+  sudo rm -f /etc/drush/$SITE.alias.drushrc.php
+}
+
+# Delete the codebase
+remove_codebase() {
+  echo "===> Removing the codebase from /vagrant/$SITE..."
+  rm -rf /vagrant/$SITE
+}
+
+# Disable and delete an Nginx vhost
+remove_vhost() {
+  echo "===> Disabling and deleting the Nginx vhost..."
+  sudo unlink /etc/nginx/sites-enabled/$SITE.conf
+  sudo rm -f /etc/nginx/sites-available/$SITE.conf
+}
+
+# Delete the Drupal crontab
+remove_cron() {
+  echo "===> Deleting the crontab /etc/cron.d/${SITE}_cron, if it is present..."
+  sudo rm -f /etc/cron.d/${SITE}_cron
+}
+
+remove_cron $SITE
+remove_drush_site_alias $SITE
+remove_vhost $SITE
+restart_nginx
+drop_site_database $SHORTNAME
+remove_codebase $SITE

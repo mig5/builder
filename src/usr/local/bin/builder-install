@@ -1,0 +1,234 @@
+#!/bin/bash
+#
+# Simple script to help with preparing a server for 
+# hosting a Drupal app (directory structure, vhost, db etc)
+#
+# Written by mig5 September 2012
+
+source /usr/local/etc/builder-common || exit 1
+
+usage()
+{
+cat << EOF
+usage: builder-install options
+
+This script builds a new site for local development.
+
+OPTIONS:
+   -u	URL of your site. Recommended to be <something>.dev.example.com
+   -n	Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+   -g	URL of the git repository to clone.
+   -b	Branch of the git repository to checkout. Defaults to 'master'
+   -p	Install profile name. This must be the 'machine' name of the profile, e.g 'my_profile', not 'My Profile'. Defaults to 'standard'.
+   -h   This help message
+EOF
+}
+
+SITE=
+SHORTNAME=
+GIT=
+BRANCH="master"
+PROFILE="standard"
+
+while getopts "u:n:g:b:p:h" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit
+      ;;
+    u)
+      SITE=$OPTARG
+      ;;
+    n)
+      SHORTNAME=$OPTARG
+      ;;
+    g)
+      GIT=$OPTARG
+      ;;
+    b)
+      BRANCH=$OPTARG
+      ;;
+    p)
+      PROFILE=$OPTARG
+      ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+# Check that required arguments were sent.
+if [[ -z $SITE ]]; then
+  color '31;1' "Missing a site URL!"
+  usage
+  exit 1
+fi
+
+if [[ -z $SHORTNAME ]]; then
+  color '31;1' "Missing a shortname for the site!"
+  usage
+  exit 1
+fi
+
+if [[ -z $GIT ]]; then
+  color '31;1' "Missing a Git repository URL to clone!"
+  usage
+  exit 1
+fi
+
+
+#####################################################################
+#                                                                   #
+# Our functions follow, and are called at the bottom of the script. #
+#                                                                   #
+#####################################################################
+
+# Check if this site has already been built before (maybe a -r rebuild ought to have been sent, but wasn't)
+check_for_existing_site() {
+  stat /vagrant/$SITE > /dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    color '31;1' "Found the site $SITE in /vagrant/$SITE already."
+    echo "Maybe it already has been built and you wanted to update it with <builder update>?"
+    exit 1
+  fi
+}
+
+# Git clone the site
+build_platform() {
+  echo "===> Building platform in /vagrant/$SITE"
+  git clone --branch $BRANCH $GIT /vagrant/$SITE
+}
+
+
+# Drush site-install a fresh site
+drupal_prepare_install() {
+  # Make Drupal directories that aren't version controlled
+  echo "===> Making non-version-controlled Drupal directories"
+
+  check_for_www_subdirectory
+
+  # Work out if we are working with a multisite environment or not
+  if [ -e /vagrant/$SITE/$WWWSUBDIR/sites/$SITE ]; then
+    SITE_SUBDIR=$SITE
+  else
+    SITE_SUBDIR=default
+  fi
+
+  mkdir -p /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/files
+  chown -R vagrant:www-data /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/files
+  chmod 2775 /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/files
+  mkdir -p /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/{files,private/temp,private/files,modules,themes}
+
+  # Set perms
+  chgrp -R www-data /vagrant/$SITE
+
+  # Install the site
+  builtin cd /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR
+  echo "===> Installing Drupal..."
+
+  count=`ls -1 /vagrant/$SITE/db/*.sql.bz2 2>/dev/null | wc -l`
+
+  if [ $count != 0 ]; then
+    echo "===> We found a database dump, so we'll import that rather than vanilla install..."
+    bunzip2 $(ls -1 /vagrant/$SITE/db/*.sql.bz2 | head -1)
+    mysql -e "create database \`$SHORTNAME\`"
+    myPass=$(genpasswd 8)
+    mysql -e "GRANT ALL ON $SHORTNAME.* TO '${SHORTNAME}'@'localhost' IDENTIFIED BY '${myPass}'"
+    mysql $SHORTNAME < $(ls -1 /vagrant/$SITE/db/*.sql | head -1)
+
+    # In Acquia cases, I think we want to retain the existing settings.php and just add db credentials to it..
+    if [[ $WWWSUBDIR != "docroot" ]]; then
+      cp /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/default.settings.php /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/settings.php
+    fi
+
+    if [ -f /vagrant/$SITE/$WWWSUBDIR/modules/overlay/overlay.info ]; then
+      cat >> /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/settings.php <<EOF
+\$databases['default']['default'] = array(
+ 'driver' => 'mysql',
+ 'database' => '${SHORTNAME}',
+ 'username' => '${SHORTNAME}',
+ 'password' => '${myPass}',
+ 'host' => 'localhost',
+ );
+EOF
+
+    else
+      cat >> /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/settings.php <<EOF
+\$db_url = 'mysql://${SHORTNAME}:${myPass}@localhost/${SHORTNAME}';
+EOF
+    fi
+
+  else
+    # 'standard' profile is the default, but should be 'default' if Drupal 6.
+    if [[ $PROFILE == "standard" ]]; then
+      if [ ! -f /vagrant/$SITE/$WWWSUBDIR/modules/overlay/overlay.info ]; then
+        PROFILE="default"
+      fi
+    fi
+    # Get rid of any existing settings.php!
+    if [ -f /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/settings.php ]; then
+      color '31;1' "Found settings.php in /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR already. Moving it out of the way to /vagrant/$SITE/settings.php.bak..."
+      mv /vagrant/$SITE/$WWWSUBDIR/sites/$SITE_SUBDIR/settings.php /vagrant/$SITE/settings.php.bak
+    fi
+    drush -y site-install --sites-subdir=$SITE_SUBDIR --db-url=mysql://$SHORTNAME:$myPass@localhost:3306/$SHORTNAME $PROFILE || exit 1
+  fi
+  echo "===> Congratulations! Drupal is now installed."
+  echo "===> Drupal site: http://${SITE}:8080/"
+  echo "===> The Drupal admin details are admin/admin"
+}
+
+# Generate a Drush alias
+create_drush_alias() {
+  check_for_www_subdirectory
+  if [[ $WWWSUBDIR == "." ]]; then
+    DRUSH_ALIAS_ROOT=/vagrant/${SITE}
+  else
+    DRUSH_ALIAS_ROOT=/vagrant/${SITE}/${WWWSUBDIR}
+  fi
+
+echo -e "<?php
+\$aliases['${SITE}'] = array(
+  'root' => '${DRUSH_ALIAS_ROOT}',
+  'uri' => '${SITE}',
+);" | sudo tee /etc/drush/$SITE.alias.drushrc.php > /dev/null
+}
+
+# Create an Nginx vhost config file
+create_vhost() {
+  check_for_www_subdirectory
+  if [[ $WWWSUBDIR == "." ]]; then
+    DOCUMENT_ROOT=/vagrant/${SITE}
+  else
+    DOCUMENT_ROOT=/vagrant/${SITE}/${WWWSUBDIR}
+  fi
+
+echo -e "
+server {
+        server_name $SITE;
+        root $DOCUMENT_ROOT;
+        listen 8080;
+
+        access_log  /var/log/nginx/access-$SHORTNAME.log  main;
+        error_log  /var/log/nginx/error-$SHORTNAME.log  notice;
+
+        include /etc/nginx/conf.d/drupal_common_config;
+}
+" | sudo tee /etc/nginx/sites-available/$SITE.conf > /dev/null
+  sudo ln -s /etc/nginx/sites-available/$SITE.conf /etc/nginx/sites-enabled/$SITE.conf
+}
+
+# Create a crontab entry
+create_drupal_cron() {
+  MINUTE=$(date +%M)
+  echo "$MINUTE * * * * www-data /usr/bin/drush @$SITE cron > /dev/null" | sudo tee /etc/cron.d/${SITE}_cron > /dev/null
+}
+
+check_for_existing_site $SITE
+build_platform $SITE || exit 1
+drupal_prepare_install $SITE $SHORTNAME $PROFILE || exit 1
+create_drush_alias $SITE || exit 1
+create_drupal_cron $SITE || exit 1
+create_vhost $SITE $SHORTNAME || exit 1
+restart_nginx

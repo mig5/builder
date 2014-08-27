@@ -1,0 +1,91 @@
+#!/bin/bash
+#
+# Simple script to help with preparing a server for 
+# hosting a Drupal app (directory structure, vhost, db etc)
+#
+# Written by mig5 September 2012
+
+source /usr/local/etc/builder-common || exit 1
+
+usage()
+{
+cat << EOF
+usage: builder-update options
+
+This script runs updates on a site.
+
+OPTIONS:
+   -u	URL of your site. Recommended to be <something>.dev.example.com
+   -h   This help message
+EOF
+}
+
+SITE=
+
+while getopts "u:h" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit
+      ;;
+    u)
+      SITE=$OPTARG
+      ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+# Check that required arguments were sent.
+if [[ -z $SITE ]]; then
+  color '31;1' "Missing a site URL!"
+  usage
+  exit 1
+fi
+
+#####################################################################
+#                                                                   #
+# Our functions follow, and are called at the bottom of the script. #
+#                                                                   #
+#####################################################################
+
+# Check if this site has already been built before (maybe a -r rebuild ought to have been sent, but wasn't)
+check_for_existing_site() {
+  drush sa | grep ^@$SITE$ > /dev/null
+  if [ $? -eq 0 ]; then
+    echo "Found drush alias for this sitename $SITE."
+  else
+    color '31;1' "Could not find a drush alias for this sitename $SITE."
+    echo "Are you sure it exists? Maybe you want to run builder <install> instead of <update>"
+    exit 1
+  fi
+}
+
+# Rebuild a site into a new platform
+code_update() {
+  echo "===> Taking a database backup of $SITE into /tmp/$SITE_backup_prior_to_rebuild_$NOW.sql.bz2"
+  drush @$SITE sql-dump | bzip2 > /tmp/$SITE_backup_prior_to_rebuild_$NOW.sql.bz2
+
+  builtin cd $(drush @$SITE dd)
+  echo "===> Pulling any updates from git"
+  git pull
+}
+
+database_update() {
+  echo "===> Running drush updatedb on the site"
+  drush -y @$SITE updatedb
+}
+
+clear_cache() {
+  echo "===> Clearing Drupal caches"
+  drush -y @$SITE cc all
+}
+
+check_for_existing_site
+code_update $SITE || exit 1
+database_update $SITE || exit 1
+clear_cache $SITE
+restart_nginx

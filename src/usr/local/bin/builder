@@ -1,0 +1,153 @@
+#!/bin/bash
+#
+# Simple script to help with preparing a server for 
+# hosting a Drupal app (directory structure, vhost, db etc)
+#
+# Written by mig5 September 2012
+
+source /usr/local/etc/builder-common || exit 1
+
+usage()
+{
+cat << EOF
+usage: $0 ARGUMENT OPTIONS
+
+This script builds a new site for local development.
+
+ARGUMENTS:
+   install <site>
+   update  <site>
+   sync    <site>
+   destroy <site>
+
+OPTIONS for INSTALL:
+   -n	Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+   -g	Mandatory. URL of the git repository to clone.
+   -b	Optional. Branch of the git repository to checkout. Defaults to 'master'
+   -p	Optional. Install profile name. This must be the 'machine' name of the profile, e.g 'my_profile', not 'My Profile'. Defaults to 'standard'.
+   -h   This help message
+
+OPTIONS for UPDATE:
+   -h   This help message
+
+OPTIONS for SYNC:
+   -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+   -s   Optional. Sync type. Valid options are 'db', 'files' or 'all'. 'all' is the default.
+   -b	Optional. Branch to sync from (assuming that there are multiple branches on the remote side. Defaults to 'master'
+   -c   Optional. Clean (sanitise) the databases to remove or protect sensitive data.
+   -f   Optional. Perform a 'full' file sync (even large files), instead of only files 100k or smaller.
+
+OPTIONS for DESTROY:
+   -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+EOF
+}
+
+# We expect two arguments: a task, and the URL of the site
+TASK=$1
+SITE=$2
+
+# Necessary so that we can specify a non getopt style argument first (SITE url)
+# but still parse the other switches later.
+shift $(( OPTIND + 1 ))
+
+# Default options
+SHORTNAME=
+GIT=
+BRANCH="master"
+PROFILE="standard"
+SYNC="all"
+CLEAN=0
+FULL=0
+
+# Parse the other options (switches)
+while getopts ":n:g:b:p:s:cfh" OPTION
+do
+  case $OPTION in
+    h)
+      usage
+      exit
+      ;;
+    n)
+      SHORTNAME=$OPTARG
+      ;;
+    g)
+      GIT=$OPTARG
+      ;;
+    b)
+      BRANCH=$OPTARG
+      ;;
+    p)
+      PROFILE=$OPTARG
+      ;;
+    s)
+      SYNC=$OPTARG
+      ;;
+    c)
+      CLEAN=1
+      ;;
+    f)
+      FULL=1
+      ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+# Check for appropriate arguments and options
+
+# No task provided
+if [[ -z $TASK ]]; then
+  color '31;1' "You didn't provide a task to run! Valid options are install, update, sync, destroy"
+  usage
+  exit 1
+fi
+
+# No site URL provided
+if [[ -z $SITE ]]; then
+  color '31;1' "You didn't provide a URL for the site to run builder on!"
+  usage
+  exit 1
+fi
+
+# If we were told to install, we must be sent a git URL or else the buck stops here.
+if [[ -z $GIT && $TASK == "install" ]]; then
+  color '31;1' "Missing a git repository URL, and you wanted to install a site for the first time!"
+  usage
+  exit 1
+fi
+
+# No short name provided?
+if [[ -z $SHORTNAME && $TASK != "update" ]]; then
+  color '31;1' "Missing a shortname for the site!"
+  usage
+  exit 1
+fi
+
+# Work out which task we want to run, and call the relevant sub-program.
+case $TASK in
+  install)
+    /usr/local/bin/builder-install -u $SITE -n $SHORTNAME -g $GIT -b $BRANCH -p $PROFILE
+    ;;
+  update)
+    /usr/local/bin/builder-update -u $SITE
+    ;;
+  sync)
+    SYNC_OPTIONS=
+    if [[ $CLEAN -eq 1 ]]; then
+      SYNC_OPTIONS="$SYNC_OPTIONS -c"
+    fi
+    if [[ $FULL -eq 1 ]]; then
+      SYNC_OPTIONS="$SYNC_OPTIONS -f"
+    fi
+    /usr/local/bin/builder-sync -u $SITE -n $SHORTNAME -s $SYNC -b $BRANCH $SYNC_OPTIONS
+    ;;
+  destroy)
+   /usr/local/bin/builder-destroy -u $SITE -n $SHORTNAME
+    ;; 
+  ?)
+    usage
+    exit
+    ;;
+esac
