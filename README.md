@@ -7,10 +7,13 @@ builder is a collection of shell scripts which allow you to effectively do
 
 It comes with 4 'tasks':
 
-builder install
-builder update
-builder sync
-builder destroy
+    builder install
+  
+    builder update
+  
+    builder sync
+  
+    builder destroy
 
 
 'install' does what you'd expect: pulls down a git repo, either imports 
@@ -31,38 +34,38 @@ USAGE instructions
 
 Here's the output of running 'builder' without any arguments
 
-vagrant@773209869508:~$ builder
-You didn't provide a task to run! Valid options are install, update, sync, destroy
-usage: /usr/local/bin/builder ARGUMENT OPTIONS
+    vagrant@773209869508:~$ builder
+    You didn't provide a task to run! Valid options are install, update, sync, destroy
+    usage: /usr/local/bin/builder ARGUMENT OPTIONS
 
-This script builds a new site for local development.
+    This script builds a new site for local development.
 
-ARGUMENTS:
-   install <site>
-   update  <site>
-   sync    <site>
-   destroy <site>
+    ARGUMENTS:
+       install <site>
+       update  <site>
+       sync    <site>
+       destroy <site>
 
-OPTIONS for INSTALL:
-   -n	Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, shortname would be 'example'
-   -g	Mandatory. URL of the git repository to clone.
-   -b	Optional. Branch of the git repository to checkout. Defaults to 'master'
-   -p	Optional. Install profile name. This must be the 'machine' name of the profile, e.g 
-        'my_profile', not 'My Profile'. Defaults to 'standard'.
-   -h   This help message
+    OPTIONS for INSTALL:
+       -n	Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, shortname would be 'example'
+       -g	Mandatory. URL of the git repository to clone.
+       -b	Optional. Branch of the git repository to checkout. Defaults to 'master'
+       -p	Optional. Install profile name. This must be the 'machine' name of the profile, e.g 
+            'my_profile', not 'My Profile'. Defaults to 'standard'.
+       -h   This help message
 
-OPTIONS for UPDATE:
-   -h   This help message
+    OPTIONS for UPDATE:
+       -h   This help message
 
-OPTIONS for SYNC:
-   -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
-   -s   Optional. Sync type. Valid options are 'db', 'files' or 'all'. 'all' is the default.
-   -b	Optional. Branch to sync from (assuming that there are multiple branches on the remote side. Defaults to 'master'
-   -c   Optional. Clean (sanitise) the databases to remove or protect sensitive data.
-   -f   Optional. Perform a 'full' file sync (even large files), instead of only files 100k or smaller.
+    OPTIONS for SYNC:
+       -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+       -s   Optional. Sync type. Valid options are 'db', 'files' or 'all'. 'all' is the default.
+       -b	Optional. Branch to sync from (assuming that there are multiple branches on the remote side. Defaults to 'master'
+       -c   Optional. Clean (sanitise) the databases to remove or protect sensitive data.
+       -f   Optional. Perform a 'full' file sync (even large files), instead of only files 100k or smaller.
 
-OPTIONS for DESTROY:
-   -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
+    OPTIONS for DESTROY:
+       -n   Mandatory. Short name of your site. e.g if your URL was example.dev.example.com, short name would be example
 
 
 
@@ -74,7 +77,7 @@ EXAMPLES
 
 So, to get started! Let's install a fresh site.
 
-  builder install foobar.dev.example.com -n foobar -g git@github.com:mig5/foobar.git
+      builder install foobar.dev.example.com -n foobar -g git@github.com:mig5/foobar.git
 
 Note the -n (shortname), -g (git repo), and that I had to provide a URL to the 'builder install' command.
 
@@ -87,12 +90,12 @@ Drupal fresh install at this point, probably (depending on what's in your repo!)
 
 Now to sync down the staging database/files from a remote staging server:
 
-  builder sync foobar.dev.example.com -n foobar
+      builder sync foobar.dev.example.com -n foobar
 
 Answer the prompts: 
 
-Host = staging.example.com for host, 
-Username = same username you SSH in to staging.example.com as
+    Host = staging.example.com for host, 
+    Username = same username you SSH in to staging.example.com as
 
 You'll find it pulls down database and rsyncs the assets. Hard-refresh http://foobar.dev.example.com:8080 in
 your browser and you should find you get a much more up-to-date looking version of the site, or at least, it 
